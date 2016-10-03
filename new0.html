@@ -1,0 +1,528 @@
+<?php
+
+    error_reporting(E_ERROR | E_PARSE);
+
+    include "config.php";
+    include "b-controller-functions.php";
+    include "projectbag-functions.php";
+
+    require_once 'scripts/PHPExcel_1.7.8/PHPExcel.php';
+    require_once 'scripts/PHPExcel_1.7.8/PHPExcel/IOFactory.php';
+
+
+    //$svlId = $argv[1];
+    $svlId = safe($_GET["id"]);
+    /* Delete target file if exists. */
+    unlink("SVLs/svl".$svlId.".xlsx");
+
+    /* Get SVL data */
+    $svlData = mysql_fetch_array(mysql_query(" SELECT * FROM bazaar_projects WHERE id = $svlId "));
+
+    $inputFileName = 'SVLDUMMY_K.xlsx';
+
+    PHPExcel_Shared_Font::setAutoSizeMethod(PHPExcel_Shared_Font::AUTOSIZE_METHOD_EXACT);
+
+
+    /* Read excel sheet. */
+    $objReader = PHPExcel_IOFactory::createReader('Excel2007');
+    $objReader = $objReader->load($inputFileName);
+
+    /* ---- 'SVL DETAILS' TAB PARSING ------------------------------------------------------------------------- */
+
+    /* Set Active sheet. */
+    $objReader->setActiveSheetIndex(2);
+
+    /* Requests for that SVL */
+    $svlRequests = getSVLRequests($svlId);
+
+    /* Columns Indexes. */
+    $ericssonProductName = "E2";
+
+    $vendorName = "A";
+    $softwareName = "B";
+    $softwareWebAddress = "C";
+    $agreementNumber = "D";
+    //$sourcingResponsible = "E";
+    $softwareType = "E";
+    $softwareVersion = "F";
+    $platform = "G";
+
+    $ericssonProductNro = "H";
+    $ericsson3ppLicense = "J";
+    $ericsson3ppLicenseKeyNro = "J";
+    $ericsson3ppLicenseKeyParameters = "K";
+
+    $currency = "M";
+    $price_model = "N";
+    $License_cost = "L"; //changed to runtime royalty fee
+
+    //$supportFromVendor = "R";
+    $designCountryOfOrigin = "R";
+    $euECCN = "S";
+    $usECCN = "T";
+    $bisAuthorization = "U";
+    $earRegulation = "V";
+    $secureEncryptedProtocol = "W";
+    $encryptionAlgorithms = "X";
+
+    /* Set SVL Details Header */
+    $objReader->getActiveSheet()->SetCellValue($ericssonProductName,$svlData['ericssonproductname']);
+
+    //$objReader->getActiveSheet()->SetCellValue('',$svlData['ericssonproductname']);
+
+    /* Row Counter. Starts at row 7.  */
+    $row = 7;
+
+    while($svlRequest = mysql_fetch_array($svlRequests)){
+
+        if($svlRequest['PRIMid']){
+
+            $fals_array = null;
+            $fals = null;
+            /* Get license for component. */
+            if($svlRequest['imported'] OR $svlRequest['cloned']){
+                $fals = $svlRequest['commercial_fals'];
+                $fals_array = explode(",", $fals);
+            }else{
+                if($svlRequest['cft_request_number']){ $fals = getComponentLicenses($svlRequest['cft_request_number'], null, strtolower(trim($type))); }
+                $fals = str_replace(" ", "", $fals);
+                $fals_array = explode(",", $fals);
+            }
+
+            //Remove hidden fals.
+            $hidden_fals = mysql_query("SELECT * FROM bazaar_request_hidden_fals WHERE bazaar_request_id = {$svlRequest['id']}");
+            if(mysql_num_rows($hidden_fals)){
+                while($hidden_fal = mysql_fetch_array($hidden_fals)){
+                    if ($svlRequest['id'] == $hidden_fal['bazaar_request_id'] AND in_array($hidden_fal['fal'], $fals_array)){
+                        if(($key = array_search($hidden_fal['fal'], $fals_array)) !== false) {
+                            unset($fals_array[$key]);
+                        }
+                    }
+                }
+            }
+
+            /* Crypto-Algorithms */
+            if($svlRequest['ECSymmetricAlgorithms']){ $symmetricAlgorithms = "Symmetric: ".$svlRequest['ECSymmetricAlgorithms'];
+            }else{ $symmetricAlgorithms = "Symmetric: N/A"; }
+            if($svlRequest['ECAsymmetricAlgorithms']){ $asymmetricAlgorithms = "Asymmetric: ".$svlRequest['ECAsymmetricAlgorithms'];
+            }else{ $asymmetricAlgorithms = "Asymmetric: N/A"; }
+            if($svlRequest['ECHashAlgorithms']){ $hashAlgorithms = "Hash: ".$svlRequest['ECHashAlgorithms'];
+            }else{ $hashAlgorithms = "Hash: N/A"; }
+
+            /* Check if is foss or commercial. Manage 'Other' type. */
+            if($svlRequest['type'] == "Other" AND $svlRequest['componentid']){
+                if(checkIsFOSS($svlRequest['PRIMid'])){ $type = 'FOSS'; }else{ $type = 'Commercial'; }
+            }else{ $type = $svlRequest['type']; }
+
+            /* Check CXS format. */
+            $cxsNumber = null;
+            if(substr($svlRequest['primCXSid'], 0, 4) == "1551"){ $cxsNumber = str_replace(' ', '', $svlRequest['primCXSid']); }
+            elseif(substr($svlRequest['primCXSid'], 0, 3) == "CXS"){ $cxsNumber = str_replace(' ', '', "1551-".$svlRequest['primCXSid']); }
+
+
+
+
+            /* Set FALs info in different rows for same component. */
+            /* Data parsing. FOSS. */
+            if(count($fals_array)<2 AND $type=='FOSS'){
+
+                // Vendor Name
+                if(trim($svlRequest['initial_cft_manufacturename'])){ $objReader->getActiveSheet()->SetCellValue("$vendorName$row",$svlRequest['initial_cft_manufacturename']); }
+                elseif(trim($svlRequest['ManufacturerName'])){ $objReader->getActiveSheet()->SetCellValue("$vendorName$row",$svlRequest['ManufacturerName']); }
+                else { $objReader->getActiveSheet()->SetCellValue("$vendorName$row",$svlRequest['GIName']); }
+                // SW Name
+                if(trim($svlRequest['GIName'])){ $objReader->getActiveSheet()->SetCellValue("$softwareName$row",$svlRequest['GIName']); }
+                else{ $objReader->getActiveSheet()->SetCellValue("$softwareName$row", "N/A"); }
+                // Web Address
+                if($svlRequest['initial_comp_downloadlink']){ $objReader->getActiveSheet()->SetCellValue("$softwareWebAddress$row", $svlRequest['initial_comp_downloadlink']); }
+                elseif($svlRequest['GIURL']){ $objReader->getActiveSheet()->SetCellValue("$softwareWebAddress$row",$svlRequest['GIURL']); }
+                elseif($svlRequest['GICURL']){ $objReader->getActiveSheet()->SetCellValue("$softwareWebAddress$row",$svlRequest['GICURL']); }
+                else{ $objReader->getActiveSheet()->SetCellValue("$softwareWebAddress$row", "N/A"); }
+                //CXS Number/Agreement Nro
+                if(strtolower(trim($type)) == "foss"){
+                    if($cxsNumber){ $objReader->getActiveSheet()->SetCellValue("$agreementNumber$row",$cxsNumber); }
+                    else{ $objReader->getActiveSheet()->SetCellValue("$agreementNumber$row", "N/A"); }
+                }else{
+                    $objReader->getActiveSheet()->SetCellValue("$agreementNumber$row",$commercial_info['com_sap_clm_number']);
+                }
+                $objReader->getActiveSheet()->SetCellValue("$softwareType$row",$type);
+                if($svlRequest['initial_cft_manufacturesoftwareversion']){ $objReader->getActiveSheet()->SetCellValue("$softwareVersion$row",$svlRequest['initial_cft_manufacturesoftwareversion']); }
+                else{  $objReader->getActiveSheet()->SetCellValue("$softwareVersion$row", "N/A");  }
+                if($svlRequest['initial_comp_platform']){ $objReader->getActiveSheet()->SetCellValue("$platform$row",$svlRequest['initial_comp_platform']); }
+                else{ $objReader->getActiveSheet()->SetCellValue("$platform$row", "N/A"); }
+                if($svlRequest['RState']){ $objReader->getActiveSheet()->SetCellValue("$ericssonProductNro$row",$svlRequest['PRIMid']." ".$svlRequest['RState']); }
+                else{ $objReader->getActiveSheet()->SetCellValue("$ericssonProductNro$row", "N/A"); }
+                if($fals){ $objReader->getActiveSheet()->SetCellValue("$ericsson3ppLicense$row",$fals); }
+                else{ $objReader->getActiveSheet()->SetCellValue("$ericsson3ppLicense$row", "N/A"); }
+                if($svlRequest['FAT']){ $objReader->getActiveSheet()->SetCellValue("$ericsson3ppLicenseKeyNro$row",$svlRequest['FAT']); }
+                else{ $objReader->getActiveSheet()->SetCellValue("$ericsson3ppLicenseKeyNro$row", "N/A"); }
+                if($svlRequest['ECCountry']){ $objReader->getActiveSheet()->SetCellValue("$designCountryOfOrigin$row",$svlRequest['ECCountry']); }
+                else{ $objReader->getActiveSheet()->SetCellValue("$designCountryOfOrigin$row", "N/A"); }
+                if($svlRequest['NatECCNCode']){ $objReader->getActiveSheet()->SetCellValue("$euECCN$row",$svlRequest['NatECCNCode']); }
+                else{ $objReader->getActiveSheet()->SetCellValue("$euECCN$row", "N/A"); }
+                if($svlRequest['ECCNCode']){ $objReader->getActiveSheet()->SetCellValue("$usECCN$row",$svlRequest['ECCNCode']); }
+                else{ $objReader->getActiveSheet()->SetCellValue("$usECCN$row", "N/A"); }
+                if($svlRequest['CCATS']){ $objReader->getActiveSheet()->SetCellValue("$bisAuthorization$row", $svlRequest['CCATS']); }
+                else{ $objReader->getActiveSheet()->SetCellValue("$bisAuthorization$row", "N/A"); }
+                if($svlRequest['CommercialLicenseExceptions']){ $objReader->getActiveSheet()->SetCellValue("$earRegulation$row", $svlRequest['CommercialLicenseExceptions']); }
+                else{ $objReader->getActiveSheet()->SetCellValue("$earRegulation$row", "N/A"); }
+                if($svlRequest['ECProtocols']){ $objReader->getActiveSheet()->SetCellValue("$secureEncryptedProtocol$row",$svlRequest['ECProtocols']); }
+                else{ $objReader->getActiveSheet()->SetCellValue("$secureEncryptedProtocol$row", "N/A"); }
+                if(strtolower(trim($type)) == 'commercial') {
+                    if ($commercial_info['com_currency']) {
+                        $objReader->getActiveSheet()->SetCellValue("$currency$row", $commercial_info['com_currency']);
+                    } else {
+                        $objReader->getActiveSheet()->SetCellValue("$currency$row", "");
+                    }
+                    if ($commercial_info['com_price_model']) {
+                        $objReader->getActiveSheet()->SetCellValue("$price_model$row", $commercial_info['com_price_model']);
+                    } else {
+                        $objReader->getActiveSheet()->SetCellValue("$price_model$row", "");
+                    }
+                    if ($commercial_info['com_net_price']) {
+                        $objReader->getActiveSheet()->SetCellValue("$License_cost$row", $commercial_info['com_net_price']);
+                    } else {
+                        $objReader->getActiveSheet()->SetCellValue("$price_model$row", "");
+                    }
+                }
+                $objReader->getActiveSheet()->SetCellValue("$encryptionAlgorithms$row"," ".$symmetricAlgorithms." \n".$asymmetricAlgorithms." \n".$hashAlgorithms);
+                $row++;
+
+            // Set FAL info in different rows.
+            }elseif(count($fals_array)>0){
+
+                $is_first_fal = true;
+
+                foreach ($fals_array as $array_fal){
+
+                    $commercial_info = null;
+                    $commercial_info = ReturnCommercialInfo($type, $array_fal);
+                    if($is_first_fal){
+                        // Vendor Name
+                        if(trim($svlRequest['initial_cft_manufacturename'])){ $objReader->getActiveSheet()->SetCellValue("$vendorName$row",$svlRequest['initial_cft_manufacturename']); }
+                        elseif(trim($svlRequest['ManufacturerName'])){ $objReader->getActiveSheet()->SetCellValue("$vendorName$row",$svlRequest['ManufacturerName']); }
+                        else { $objReader->getActiveSheet()->SetCellValue("$vendorName$row",$svlRequest['GIName']); }
+                        // SW Name
+                        if($svlRequest['GIName']){ $objReader->getActiveSheet()->SetCellValue("$softwareName$row",$svlRequest['GIName']); }
+                        else{ $objReader->getActiveSheet()->SetCellValue("$softwareName$row", "N/A"); }
+                        // Web Address
+                        if($svlRequest['initial_comp_downloadlink']){ $objReader->getActiveSheet()->SetCellValue("$softwareWebAddress$row", $svlRequest['initial_comp_downloadlink']); }
+                        elseif($svlRequest['GIURL']){ $objReader->getActiveSheet()->SetCellValue("$softwareWebAddress$row",$svlRequest['GIURL']); }
+                        elseif($svlRequest['GICURL']){ $objReader->getActiveSheet()->SetCellValue("$softwareWebAddress$row",$svlRequest['GICURL']); }
+                        else{ $objReader->getActiveSheet()->SetCellValue("$softwareWebAddress$row", "N/A"); }
+                        //CXS Number/Agreement Nro
+                        if(strtolower(trim($type)) == "foss"){
+                            if($cxsNumber){ $objReader->getActiveSheet()->SetCellValue("$agreementNumber$row",$cxsNumber); }
+                            else{ $objReader->getActiveSheet()->SetCellValue("$agreementNumber$row", "N/A"); }
+                        }else{
+                            $objReader->getActiveSheet()->SetCellValue("$agreementNumber$row",$commercial_info['com_sap_clm_number']);
+                        }
+                        //if($svlRequest['initial_cft_agreementresponsible']){ $objReader->getActiveSheet()->SetCellValue("$sourcingResponsible$row",$svlRequest['initial_cft_agreementresponsible']); }
+                        //else{ $objReader->getActiveSheet()->SetCellValue("$sourcingResponsible$row", "N/A"); }
+                        $objReader->getActiveSheet()->SetCellValue("$softwareType$row",$type);
+                        if($svlRequest['initial_cft_manufacturesoftwareversion']){ $objReader->getActiveSheet()->SetCellValue("$softwareVersion$row",$svlRequest['initial_cft_manufacturesoftwareversion']); }
+                        else{  $objReader->getActiveSheet()->SetCellValue("$softwareVersion$row", "N/A");  }
+                        if($svlRequest['initial_comp_platform']){ $objReader->getActiveSheet()->SetCellValue("$platform$row",$svlRequest['initial_comp_platform']); }
+                        else{ $objReader->getActiveSheet()->SetCellValue("$platform$row", "N/A"); }
+                        if($svlRequest['RState']){ $objReader->getActiveSheet()->SetCellValue("$ericssonProductNro$row",$svlRequest['PRIMid']." ".$svlRequest['RState']); }
+                        else{ $objReader->getActiveSheet()->SetCellValue("$ericssonProductNro$row", "N/A"); }
+                        if($array_fal){ $objReader->getActiveSheet()->SetCellValue("$ericsson3ppLicense$row",$array_fal); }
+                        else{ $objReader->getActiveSheet()->SetCellValue("$ericsson3ppLicense$row", "N/A"); }
+                        if($svlRequest['FAT']){ $objReader->getActiveSheet()->SetCellValue("$ericsson3ppLicenseKeyNro$row",$svlRequest['FAT']); }
+                        else{ $objReader->getActiveSheet()->SetCellValue("$ericsson3ppLicenseKeyNro$row", "N/A"); }
+                        if($svlRequest['ECCountry']){ $objReader->getActiveSheet()->SetCellValue("$designCountryOfOrigin$row",$svlRequest['ECCountry']); }
+                        else{ $objReader->getActiveSheet()->SetCellValue("$designCountryOfOrigin$row", "N/A"); }
+                        if($svlRequest['NatlllECCNCode']){ $objReader->getActiveSheet()->SetCellValue("$euECCN$row",$svlRequest['NatECCNCode']); }
+                        else{ $objReader->getActiveSheet()->SetCellValue("$euECCN$row", "N/A"); }
+                        if($svlRequest['ECCNCode']){ $objReader->getActiveSheet()->SetCellValue("$usECCN$row",$svlRequest['ECCNCode']); }
+                        else{ $objReader->getActiveSheet()->SetCellValue("$usECCN$row", "N/A"); }
+                        if($svlRequest['CCATS']){ $objReader->getActiveSheet()->SetCellValue("$bisAuthorization$row", $svlRequest['CCATS']); }
+                        else{ $objReader->getActiveSheet()->SetCellValue("$bisAuthorization$row", "N/A"); }
+                        if($svlRequest['CommercialLicenseExceptions']){ $objReader->getActiveSheet()->SetCellValue("$earRegulation$row", $svlRequest['CommercialLicenseExceptions']); }
+                        else{ $objReader->getActiveSheet()->SetCellValue("$earRegulation$row", "N/A"); }
+                        if($svlRequest['ECProtocols']){ $objReader->getActiveSheet()->SetCellValue("$secureEncryptedProtocol$row",$svlRequest['ECProtocols']); }
+                        else{ $objReader->getActiveSheet()->SetCellValue("$secureEncryptedProtocol$row", "N/A"); }
+                        if(strtolower(trim($type)) == 'commercial') {
+                            if ($commercial_info['com_currency']) {
+                                $objReader->getActiveSheet()->SetCellValue("$currency$row", $commercial_info['com_currency']);
+                            } else {
+                                $objReader->getActiveSheet()->SetCellValue("$currency$row", "");
+                            }
+                            if ($commercial_info['com_price_model']) {
+                                $objReader->getActiveSheet()->SetCellValue("$price_model$row", $commercial_info['com_price_model']);
+                            } else {
+                                $objReader->getActiveSheet()->SetCellValue("$price_model$row", "");
+                            }
+                            if ($commercial_info['com_net_price']) {
+                                $objReader->getActiveSheet()->SetCellValue("$License_cost$row", $commercial_info['com_net_price']);
+                            } else {
+                                $objReader->getActiveSheet()->SetCellValue("$price_model$row", "");
+                            }
+                        }
+
+                        $objReader->getActiveSheet()->SetCellValue("$encryptionAlgorithms$row"," ".$symmetricAlgorithms." \n".$asymmetricAlgorithms." \n".$hashAlgorithms);
+
+                    }else{
+
+                        //EMPTY ROW ONLY COMMERCIAL INFO
+                        // Vendor Name
+                        if(trim($svlRequest['initial_cft_manufacturename'])){ $objReader->getActiveSheet()->SetCellValue("$vendorName$row", ""); }
+                        elseif(trim($svlRequest['ManufacturerName'])){ $objReader->getActiveSheet()->SetCellValue("$vendorName$row", ""); }
+                        else { $objReader->getActiveSheet()->SetCellValue("$vendorName$row", ""); }
+                        // SW Name
+                        if($svlRequest['GIName']){ $objReader->getActiveSheet()->SetCellValue("$softwareName$row", ""); }
+                        else{ $objReader->getActiveSheet()->SetCellValue("$softwareName$row", ""); }
+                        // Web Address
+                        if($svlRequest['initial_comp_downloadlink']){ $objReader->getActiveSheet()->SetCellValue("$softwareWebAddress$row", ""); }
+                        elseif($svlRequest['GIURL']){ $objReader->getActiveSheet()->SetCellValue("$softwareWebAddress$row", ""); }
+                        elseif($svlRequest['GICURL']){ $objReader->getActiveSheet()->SetCellValue("$softwareWebAddress$row", ""); }
+                        else{ $objReader->getActiveSheet()->SetCellValue("$softwareWebAddress$row", ""); }
+                        //CXS Number/Agreement Nro
+                        if(strtolower(trim($type)) == "foss"){
+                            if($cxsNumber){ $objReader->getActiveSheet()->SetCellValue("$agreementNumber$row",$cxsNumber); }
+                            else{ $objReader->getActiveSheet()->SetCellValue("$agreementNumber$row", "N/A"); }
+                        }else{
+                            $objReader->getActiveSheet()->SetCellValue("$agreementNumber$row",$commercial_info['com_sap_clm_number']);
+                        }
+                        //if($svlRequest['initial_cft_agreementresponsible']){ $objReader->getActiveSheet()->SetCellValue("$sourcingResponsible$row", ""); }
+                        //else{ $objReader->getActiveSheet()->SetCellValue("$sourcingResponsible$row", ""); }
+                        $objReader->getActiveSheet()->SetCellValue("$softwareType$row", "");
+                        if($svlRequest['initial_cft_manufacturesoftwareversion']){ $objReader->getActiveSheet()->SetCellValue("$softwareVersion$row", ""); }
+                        else{  $objReader->getActiveSheet()->SetCellValue("$softwareVersion$row", "");  }
+                        if($svlRequest['initial_comp_platform']){ $objReader->getActiveSheet()->SetCellValue("$platform$row", ""); }
+                        else{ $objReader->getActiveSheet()->SetCellValue("$platform$row", ""); }
+                        if($svlRequest['RState']){ $objReader->getActiveSheet()->SetCellValue("$ericssonProductNro$row", ""); }
+                        else{ $objReader->getActiveSheet()->SetCellValue("$ericssonProductNro$row", ""); }
+                        //FALS
+                        if($array_fal){ $objReader->getActiveSheet()->SetCellValue("$ericsson3ppLicense$row",$array_fal); }
+                        else{ $objReader->getActiveSheet()->SetCellValue("$ericsson3ppLicense$row", "N/A"); }
+                        //FATS
+                        if($svlRequest['FAT']){ $objReader->getActiveSheet()->SetCellValue("$ericsson3ppLicenseKeyNro$row", ""); }
+                        else{ $objReader->getActiveSheet()->SetCellValue("$ericsson3ppLicenseKeyNro$row", ""); }
+                        if($svlRequest['ECCountry']){ $objReader->getActiveSheet()->SetCellValue("$designCountryOfOrigin$row", ""); }
+                        else{ $objReader->getActiveSheet()->SetCellValue("$designCountryOfOrigin$row", ""); }
+                        if($svlRequest['NatlllECCNCode']){ $objReader->getActiveSheet()->SetCellValue("$euECCN$row", ""); }
+                        else{ $objReader->getActiveSheet()->SetCellValue("$euECCN$row", ""); }
+                        if($svlRequest['ECCNCode']){ $objReader->getActiveSheet()->SetCellValue("$usECCN$row", ""); }
+                        else{ $objReader->getActiveSheet()->SetCellValue("$usECCN$row", ""); }
+                        if($svlRequest['CCATS']){ $objReader->getActiveSheet()->SetCellValue("$bisAuthorization$row", ""); }
+                        else{ $objReader->getActiveSheet()->SetCellValue("$bisAuthorization$row", ""); }
+                        if($svlRequest['CommercialLicenseExceptions']){ $objReader->getActiveSheet()->SetCellValue("$earRegulation$row", ""); }
+                        else{ $objReader->getActiveSheet()->SetCellValue("$earRegulation$row", ""); }
+                        if($svlRequest['ECProtocols']){ $objReader->getActiveSheet()->SetCellValue("$secureEncryptedProtocol$row", ""); }
+                        else{ $objReader->getActiveSheet()->SetCellValue("$secureEncryptedProtocol$row", ""); }
+                        if(strtolower(trim($type)) == 'commercial') {
+                            if ($commercial_info['com_currency']) {
+                                $objReader->getActiveSheet()->SetCellValue("$currency$row", $commercial_info['com_currency']);
+                            } else {
+                                $objReader->getActiveSheet()->SetCellValue("$currency$row", "");
+                            }
+                            if ($commercial_info['com_price_model']) {
+                                $objReader->getActiveSheet()->SetCellValue("$price_model$row", $commercial_info['com_price_model']);
+                            } else {
+                                $objReader->getActiveSheet()->SetCellValue("$price_model$row", "");
+                            }
+                            if ($commercial_info['com_net_price']) {
+                                $objReader->getActiveSheet()->SetCellValue("$License_cost$row", $commercial_info['com_net_price']);
+                            } else {
+                                $objReader->getActiveSheet()->SetCellValue("$price_model$row", "");
+                            }
+                        }
+                    }
+                    $is_first_fal = null;
+                    $row++;
+                }
+            }
+        }
+    }
+
+
+    function ReturnCommercialInfo($type, $fal){
+        if(strtolower(trim($type)) == "commercial"){
+            global $linkohi;
+            $ohi_query = mysql_fetch_array(mysql_query( " SELECT SMs.*, Vendors.VendorReportName, Agreements.Currency, Agreements.AgreementNumber, Agreements.SAPCLMNumber 
+                                                       FROM SMs 
+                                                       LEFT JOIN Agreements ON Agreements.AgreementID = SMs.AgreementID
+                                                       LEFT JOIN Vendors ON Vendors.VendorID = Agreements.VendorID
+                                                       WHERE SM = '".trim($fal)."'", $linkohi ));
+            $result['com_vendor_report_name'] = $ohi_query['VendorReportName'];
+            $result['com_net_price'] = number_format((float)$ohi_query['NetPrice'],2, '.', '');
+            $result['com_price_model'] = $ohi_query['PriceModel'];
+            $result['com_currency'] = $ohi_query['Currency'];
+            $result['com_agreement_nro'] = $ohi_query['AgreementNumber'];
+            $result['com_sap_clm_number'] = $ohi_query['SAPCLMNumber'];
+            return $result;
+        }
+    }
+
+
+    /* Auto size columns for each worksheet */
+    /* SVL details auto-size. */
+    $sheet = $objReader->setActiveSheetIndex(2);
+    $cellIterator = $sheet->getRowIterator()->current()->getCellIterator();
+    $cellIterator->setIterateOnlyExistingCells(true);
+    foreach ($cellIterator as $cell) {
+       $sheet->getColumnDimension($cell->getColumn())->setAutoSize(true);
+    }
+    /* 2400- details auto-size. */
+    $sheet = $objReader->setActiveSheetIndex(3);
+    $cellIterator = $sheet->getRowIterator()->current()->getCellIterator();
+    $cellIterator->setIterateOnlyExistingCells(true);
+    foreach ($cellIterator as $cell) {
+       $sheet->getColumnDimension($cell->getColumn())->setAutoSize(true);
+    }
+    /* 2401- details auto-size. */
+    $sheet = $objReader->setActiveSheetIndex(4);
+    $cellIterator = $sheet->getRowIterator()->current()->getCellIterator();
+    $cellIterator->setIterateOnlyExistingCells(true);
+    foreach ($cellIterator as $cell) {
+       $sheet->getColumnDimension($cell->getColumn())->setAutoSize(true);
+    }
+
+
+    $styleArray = array(
+        'borders' => array(
+            'allborders' => array(
+                'style' => PHPExcel_Style_Border::BORDER_THICK
+            )
+        )
+    );
+    $objReader->getDefaultStyle()->applyFromArray($styleArray);
+
+    /* Set Active sheet. */
+    $objReader->setActiveSheetIndex(0);
+
+    $objWriter = PHPExcel_IOFactory::createWriter($objReader, 'Excel2007');
+    $objWriter->save("SVLs/svl".$svlId.".xlsx");
+
+    /* Print download table. */
+    print " <style>
+                #generatingtable{
+                    font-size: 13px;
+                    padding: 10px 10px 10px 10px;
+                    width: 350px;
+                }
+            </style>";
+
+    print " <div id='response'>
+                 <table style='margin: 0px auto; text-align: center;' id='generatingtable' cellspacing='10'>
+                    <tr>
+                        <td>
+                            <br/>
+                            <img src='images/excel_icon.gif' />
+                            <br/>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>
+                            SVL generated sucessfully.<br/>
+                            SVL Name: <b>".$svlData['name']."</b> 
+                            <br/><br/>
+                            <center>
+                                <button type='button' class='commonbutton' onclick='window.close()'>Close</button>
+                                <button type='button' class='commonbutton' onclick='window.location.href = \"SVLs/svl$svlId.xlsx\"'>Download SVL</button>
+                            </center>
+                        </td>
+                    </tr>
+                </table>
+            </div>";
+
+
+    function getComponentLicenses($requestNumber, $CAX, $type){
+
+        if($type == "commercial"){
+
+            $query = " SELECT CommercialFALs FROM cthub_requests WHERE CFTCode = '$requestNumber' AND CommercialFALs <> '' AND CommercialFALs IS NOT NULL LIMIT 1 ";
+            $commercial_fals = mysql_query($query);
+            $commercial_fals = mysql_fetch_array($commercial_fals);
+            return $commercial_fals[0];
+
+        }else {
+
+            if ($requestNumber) {
+                /* Check if sub-fals exist in cthub_requests */
+                $subfals = mysql_fetch_array(mysql_query(" SELECT cthub_requests.PRIMid, cthub_requests.CommercialFALs FROM cthub_requests WHERE CFTcode = '" . $requestNumber . "'"));
+                $CAX = $subfals['PRIMid'];
+            } else {
+                /* Check if sub-fals exist in cthub_requests */
+                $subfals = mysql_fetch_array(mysql_query(" SELECT cthub_requests.CommercialFALs FROM cthub_requests WHERE PRIMid = '" . $CAX . "'"));
+            }
+
+            /* If subfals print them. */
+            if ($subfals['CommercialFALs']) {
+                return $subfals['CommercialFALs'];
+            } else {
+                /* Hidding main FALs for Commercial. */
+                if (checkIsFOSS($CAX)) {
+                    /* Get licenses for that CAX. */
+                    $componentlicenses = mysql_query(" SELECT cthub_caxfal.FAL, FALs.name as FALName 
+                                                    FROM cthub_caxfal 
+                                                    LEFT JOIN FALs ON cthub_caxfal.FAL = FALs.FAL
+                                                    WHERE cthub_caxfal.CAX = '" . $CAX . "'
+                                                    AND cthub_caxfal.FAL <> 'FAL1159998' AND cthub_caxfal.FAL <> 'FALstructurenotdefined' AND cthub_caxfal.FAL <> 'FAL1159997' AND cthub_caxfal.FAL <> 'FAL1159999'");
+                    while ($s = mysql_fetch_array($componentlicenses)) {
+                        $fals .= $s['FAL'] . ", ";
+                    }
+                    /* remove last comma. */
+                    $fals = substr($fals, 0, -2);
+                    return $fals;
+                }
+            }
+        }
+    }
+
+
+
+    function getSVLRequests($svlId){
+
+        $svlRequests = " SELECT bazaar_requests.*,  
+                                cthub_requests.GIName,
+                                cthub_requests.GIVersion,
+                                cthub_requests.GIURL,
+                                cthub_requests.GICURL,                                
+                                cthub_requests.PRIMid, 
+                                cthub_requests.STAKO,
+                                cthub_requests.STAKOComment,
+                                cthub_requests.RECODE,
+                                cthub_requests.RState,
+                                cthub_requests.RETEXT,
+                                cthub_requests.PRCode,
+                                cthub_requests.SWType, 
+                                cthub_requests.Status AS RequestStatus,                                  
+                                cthub_requests.ECCNCode,
+                                cthub_requests.NatECCNCode,
+                                cthub_requests.ECCountry,
+                                cthub_requests.EUECCN,
+                                cthub_requests.USECCN,
+                                cthub_requests.PRIMid,
+                                cthub_requests.FAT,
+                                cthub_requests.ECProtocols,
+                                cthub_requests.SM01,
+                                cthub_requests.ECSymmetricAlgorithms,
+                                cthub_requests.ECAsymmetricAlgorithms,
+                                cthub_requests.ECHashAlgorithms,
+                                cthub_requests.USClassificationURL,
+                                cthub_requests.USClassificationDate,
+                                cthub_requests.EUClassificationURL,
+                                cthub_requests.EUClassificationDate,
+                                cthub_requests.LicenseExceptions,
+                                cthub_requests.CCATS,
+                                cthub_requests.CommercialLicenseExceptions,
+                                cthub_requests.ManufacturerName,
+                                date(bazaar_requests.date) AS added,
+                                date(cthub_requests.Doc1550generated) AS doc1550generated,                                                
+                                bazaar_requests.status AS requeststatus,
+                                bazaar_requests.specific_eval_status,
+                                bazaar_requests.id AS requestid,
+                                bazaar_users.username
+                        FROM bazaar_requests
+                        LEFT JOIN cthub_requests ON bazaar_requests.componentid = cthub_requests.id
+                        LEFT JOIN bazaar_users ON bazaar_requests.requesterId = bazaar_users.id 
+                        WHERE bazaar_requests.initial_cft_projectid = $svlId AND (bazaar_requests.status = 'Approved' OR bazaar_requests.imported OR bazaar_requests.cloned) 
+                        GROUP BY bazaar_requests.id
+                        ORDER BY cthub_requests.GIName ASC ";
+        $svlRequests = mysql_query($svlRequests);
+        return $svlRequests;
+    }
+
+?>
